@@ -1,0 +1,2 @@
+! git remote add origin https://github.com/<아이디>/<저장소>.git
+! git push -u origin main
