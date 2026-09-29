@@ -5,7 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 프로젝트 상태
 
 CNC 선반 보전관리 에이전트. Python + Streamlit 앱으로 구현해 Streamlit Community Cloud에 배포하고 계속 운영한다.
-**3단계(Streamlit UI) 완료.** PRD F1~F6이 `scripts/`에 구현되어 CLI로 동작하고, Streamlit 6개 화면(대시보드·설비 상세·이력 등록·교체 도래·고장 분석·이력 조회)이 이 함수들을 호출한다. 다음은 4단계(Playwright 검토)다.
+**1~4단계 완료, 시연용 배포 완료.** PRD F1~F6이 `scripts/`에 구현되어 CLI로 동작하고, Streamlit 6개 화면(대시보드·설비 상세·이력 등록·교체 도래·고장 분석·이력 조회)이 이 함수들을 호출한다. 4단계 검토 결과는 `reviews/review_20260929.md`에 있다.
+
+- 저장소: https://github.com/th11-99/miniproject (`main`에 push하면 Cloud가 자동 재배포)
+- 배포: https://miniproject-uh7xrfbiyhwihzutbknfkd.streamlit.app — Community Cloud, Secrets 없음, 첫 실행 때 샘플 SQLite를 자동 생성(재시작하면 등록 이력 초기화). 앱은 iframe 안의 `/~/+/` 경로에서 실제로 돈다(E2E·점검 시 이 경로로 접근)
+- 남은 일: 5단계(`prompts.md`) — 운영 PostgreSQL·마이그레이션 실행기·백업·CI·운영 문서. 미수정 결함 B-03~B-18(보고서 3장). 과제 보고서(docx)는 저장소 밖(바탕화면 제출 폴더)에서 관리한다
 
 | 파일 | 역할 |
 |---|---|
@@ -36,6 +40,8 @@ CNC 선반 보전관리 에이전트. Python + Streamlit 앱으로 구현해 Str
 TEST_DATABASE_URL=postgresql+psycopg://…/cnc_test .venv/Scripts/python -m pytest   # PostgreSQL에서도 실행 (DB 이름에 test 필수)
 .venv/Scripts/python -m streamlit run streamlit_app.py
 .venv/Scripts/python -m streamlit run streamlit_app.py --server.headless true --server.port 8501   # E2E용
+.venv/Scripts/python -m pip install playwright pytest-playwright && .venv/Scripts/python -m playwright install chromium   # E2E 준비(개발용, requirements.txt 밖)
+E2E_BASE_URL=http://localhost:8501 .venv/Scripts/python -m pytest tests/e2e -p no:cacheprovider   # 서버 DB에 실제 등록함 → 먼저 DB 백업
 ```
 
 모든 CLI는 `--format json|table`을 받고, 사용자 오류는 `오류: …`를 stderr에 찍고 종료코드 2로 끝난다(`common.run_cli`).
@@ -48,7 +54,8 @@ TEST_DATABASE_URL=postgresql+psycopg://…/cnc_test .venv/Scripts/python -m pyte
 - **DB 이중 지원**: `scripts/common.py`가 SQLite(로컬)와 PostgreSQL(운영)을 모두 연결한다. URL 우선순위는 `DATABASE_URL` → `st.secrets["database"]["url"]` → `db/maintenance.db`. SQL은 두 DB 공통 문법만 쓰고 날짜 계산은 Python에서 한다
 - **읽기전용 이중 안전장치**: `query.validate_sql()`이 SELECT/WITH 단일 문장만 통과시키고(문자열·주석을 지운 뒤 키워드 검사), `common.read_connection()`이 SQLite는 `mode=ro`, PostgreSQL은 `SET TRANSACTION READ ONLY`로 연다. 쓰기 경로는 `log_repair.py` 하나뿐
 - **운영 DB는 외부 PostgreSQL만**: Community Cloud는 재시작·재배포 때 파일이 초기화된다. `init_db.build_database()`는 SQLite가 아닌 URL을 거부한다. 현재 배포는 시연용이다: `streamlit_app.ensure_demo_db()`가 DB URL이 기본값이고 파일이 없을 때만 샘플 DB를 만든다(`DATABASE_URL`을 준 테스트·E2E에서는 동작하지 않음)
-- **4단계 검토**: `reviews/review_20260929.md`에 PRD 추적·결함 목록(B-01~B-18)이 있다. 높음 2건(B-01 짧은 별칭 오매핑, B-02 query 검사 우회)만 수정됐고 나머지는 미수정이다. E2E는 `tests/e2e/`(실행 방법은 그 conftest 문서), `E2E_BASE_URL`이 없으면 수집되지 않는다. E2E용 `playwright`·`pytest-playwright`는 requirements.txt에 넣지 않았다(Cloud 설치 제외)
+- **4단계 검토**: `reviews/review_20260929.md`에 PRD 추적·결함 목록(B-01~B-18)이 있다. 높음 2건만 수정됐다 — B-01: 2글자 이하 단일어 별칭은 어절 전체가 같을 때만 인정(`normalize.find_parts`의 `short_single`, `_PARTICLE`로 조사 제거), B-02: `query._strip_literals`가 문자열·주석을 한 번에 훑는 스캐너. 나머지는 미수정이다. E2E는 `tests/e2e/`(헬퍼는 `helpers.py`), `E2E_BASE_URL`이 없으면 수집되지 않는다. E2E용 `playwright`·`pytest-playwright`는 requirements.txt에 넣지 않았다(Cloud 설치 제외)
+- **Streamlit 1.64 DOM (E2E 선택자)**: selectbox는 react-aria ComboBox라 값은 `input[role=combobox]`의 value로 읽고, 긴 목록은 보이는 항목만 그려지므로 입력칸에 글자를 쳐서 거른 뒤 `role=option`을 누른다. segmented control은 `role=radio` + `aria-checked`, 표(`st.dataframe`)는 canvas라 셀을 DOM으로 못 읽는다(CSV 다운로드·캡션 건수로 검증). 사용자 지정 `[theme]` 때문에 시스템 다크 모드가 적용되지 않는다(B-09)
 - **사용량·판정의 단일 구현은 `scripts/usage.py`**. `UsageData(conn)`이 설비·파트·가동로그·이력을 한 번에 메모리로 읽고, `log_repair`(info 판정)·`due_check`·`analyze`가 모두 이것을 쓴다. 판정 수치(50%, 90일, 30일)도 여기 상수로 있다. 핵심 가정:
     - 가동로그는 설비 도입 이후 누적값이다. 첫 로그 이전 날짜는 도입일(0)과 첫 로그를 잇는 직선으로 추정한다(`counter()`). `init_db`의 이전 교체 이력 생성도 같은 가정으로 역산한다
     - 사용량 = 직전 "리셋 작업" 이후 증가분. 리셋은 기본 `교체`, 예외는 `RESET_ACTIONS`(LB-01 습동유는 `보충`, EL-03 판넬 쿨러 필터는 `청소`). 리셋 이력이 없으면 도입 이후 전체
