@@ -1,0 +1,11 @@
+# 테마: base를 지정하지 않아 사용자 설정(라이트/다크/시스템)을 따른다. 두 테마 모두 기본 대비를 유지한다.
+[theme]
+primaryColor = "#1f6feb"
+baseFontSize = 16        # 현장 태블릿 기준 최소 16px
+baseRadius = "medium"
+
+[server]
+runOnSave = false
+
+[browser]
+gatherUsageStats = false

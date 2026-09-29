@@ -1,0 +1,17 @@
+# 로컬 DB·산출물
+db/*.db
+db/*.db-journal
+reports/*
+!reports/.gitkeep
+reviews/screenshots/
+.playwright-mcp/
+
+# 비밀값
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
