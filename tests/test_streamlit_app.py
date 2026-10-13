@@ -87,6 +87,29 @@ def test_history_filters(app, db_url):
 
 # ---------- 이력 등록: 미리보기 → 확인 → 등록 ----------
 
+
+def test_detail_to_register_prefills_form(app, db_url):
+    at = app(db_url, "equipment_detail")
+    assert len([b for b in at.button if b.key and b.key.startswith("detail_reg_btn_")]) >= 8  # 파트가 있는 구조부마다
+    at.selectbox(key="detail_reg_part_HDS").set_value("HS-02").run()
+    at.button(key="detail_reg_btn_HDS").click().run()
+    _no_errors(at)
+    assert at.title[0].value == "이력 등록"
+    assert at.selectbox(key="reg_equipment").value == "CNC-01"
+    assert at.selectbox(key="reg_part").value.startswith("HS-02")
+    assert at.segmented_control(key="reg_action").value == "교체"
+    assert at.segmented_control(key="reg_breakdown").value == "예방"
+    assert any("설비 상세에서 넘어왔습니다" in i.value for i in at.info)
+    assert not at.button(key="preview_btn").disabled
+
+
+def test_detail_to_register_periodic_action(app, db_url):
+    """습동유(LB-01)는 보충이 주기 작업이므로 조치 기본값이 보충."""
+    at = app(db_url, "equipment_detail")
+    at.selectbox(key="detail_reg_part_BED").set_value("LB-01").run()
+    at.button(key="detail_reg_btn_BED").click().run()
+    assert at.segmented_control(key="reg_action").value == "보충"
+
 def _parse(at, text):
     at.text_input(key="nl_input").input(text).run()
     at.button(key="parse_btn").click().run()

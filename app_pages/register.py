@@ -49,6 +49,7 @@ part_by_id = {p["part_id"]: p for p in parts}
 # ---------- 1. 자연어 해석 ----------
 
 def do_parse() -> None:
+    S.pop("prefill_note", None)
     S.pop("parse_error", None)
     S.pop("preview", None)
     text = S.get("nl_input", "").strip()
@@ -75,8 +76,17 @@ def reset_form() -> None:
     for key in ("reg_equipment", "reg_part", "reg_unit", "reg_action", "reg_breakdown"):
         S[key] = None
     S["reg_date"], S["reg_desc"], S["nl_input"] = date.today(), "", ""
-    for key in ("parsed", "preview", "parse_error", "preview_error", "last_result"):
+    for key in ("parsed", "preview", "parse_error", "preview_error", "last_result", "prefill_note"):
         S.pop(key, None)
+
+
+# 설비 상세에서 "이력 등록"으로 넘어온 경우: 폼을 비우고 그 설비·파트로 채운다 (조치·구분은 주기 작업 기본값)
+prefill = S.pop("reg_prefill", None)
+if prefill:
+    reset_form()
+    S.update(reg_equipment=prefill["equipment"], reg_part=prefill["part"], reg_action=prefill["action"],
+             reg_breakdown=prefill["breakdown"], reg_desc=prefill["desc"])
+    S["prefill_note"] = prefill
 
 
 with st.container(border=True, key="nl_box"):
@@ -87,6 +97,10 @@ with st.container(border=True, key="nl_box"):
     if S.get("parse_error"):
         st.error(S["parse_error"], icon="⚠️")
     parsed = S.get("parsed")
+    if S.get("prefill_note") and not parsed:
+        note = S["prefill_note"]
+        st.info(f"설비 상세에서 넘어왔습니다: {note['equipment']} {note['part']} (교체주기 {note['status']}). "
+                f"조치 유형·구분을 확인한 뒤 미리보기를 누르세요.", icon="↪️")
     questions_box = st.container(key="parse_questions")  # 필수 입력이 다 채워지면 비운다 (아래에서 채움)
 
 # ---------- 2. 입력 확인·수정 ----------
@@ -198,6 +212,7 @@ def register_now() -> None:
         return
     S["last_result"] = result
     S.pop("preview", None)
+    S.pop("prefill_note", None)
     clear_cache()
 
 
