@@ -87,11 +87,25 @@ SCENARIOS = [
 ]
 SCENARIO_KEYS = {(eq, pid) for _, eq, pid, *_ in SCENARIOS}
 
+# 교체 초과·임박을 남겨 두는 "주의 설비". 나머지 설비는 기준일에 모두 정상(여유)이 되도록 만든다
+ATTENTION_EQUIPMENT = ("CNC-03", "CNC-07")
+SAFE_MARGIN_DAYS = 45  # 정상 설비는 교체 도래까지 최소 이만큼 남긴다 (임박 기준 30일 + 여유)
 
-def _baseline_day(rng: random.Random, end: date, part: dict, installed: date, logs: list[dict]) -> date | None:
-    """기준일(end)에 교체주기의 15~108%를 쓴 상태가 되도록 직전 교체일을 역산한다. 원부품이면 None."""
-    used = rng.uniform(0.15, 1.08) * part["interval_value"]
-    basis = part["basis"]
+
+def _baseline_day(rng: random.Random, end: date, part: dict, installed: date, logs: list[dict],
+                  attention: bool) -> date | None:
+    """기준일(end)에 교체주기의 일정 비율을 쓴 상태가 되도록 직전 교체일을 역산한다. 원부품이면 None.
+
+    주의 설비는 15~108%(초과·임박이 섞임), 정상 설비는 15~55%이되 도래까지 SAFE_MARGIN_DAYS일분 이상 남긴다.
+    """
+    frac = rng.uniform(0.15, 1.08)
+    interval, basis = part["interval_value"], part["basis"]
+    if attention:
+        used = frac * interval
+    else:
+        # 일평균 사용량은 usage.UsageData.daily_rate와 같은 방식 (기준일 직전 30일 증가분 / 30)
+        rate = 1 / MONTH_DAYS if basis == "months" else (logs[-1][basis] - logs[-31][basis]) / 30
+        used = min((0.15 + (frac - 0.15) * 0.4 / 0.93) * interval, max(0.0, interval - SAFE_MARGIN_DAYS * rate))
     if basis == "months":
         day = end - timedelta(days=round(used * MONTH_DAYS))
     else:
@@ -123,19 +137,28 @@ def _repair_logs(rng: random.Random, end: date, run_rows: list[dict]) -> list[di
         for part in master_data.PARTS:
             if (eq_id, part["part_id"]) in SCENARIO_KEYS:
                 continue  # 시나리오는 자체 이력만 사용
-            day = _baseline_day(rng, end, part, eq["installed_at"], runs_by_eq[eq_id])
+            day = _baseline_day(rng, end, part, eq["installed_at"], runs_by_eq[eq_id],
+                                eq_id in ATTENTION_EQUIPMENT)
             if day is not None:
                 desc = rng.choice(PM_TEXT).format(a="교체") if day >= start else "이전 교체 이력 (데모 초기값)"
                 add(day, eq_id, part["part_id"], "교체", False, desc)
 
-    # 1) 계획 작업: 주기마다 반복하되 일부 설비는 마지막 회차를 건너뛰어 주기 초과 상태를 만든다
+    # 1) 계획 작업: 주기마다 반복한다. 주의 설비는 가끔 마지막 회차를 건너뛰어 주기 초과 상태를 만들고,
+    #    정상 설비는 마지막 회차를 기준일 가까이(주기의 1/3 이내)에 두어 도래가 임박하지 않게 한다
     for eq in master_data.EQUIPMENT:
+        eq_id = eq["equipment_id"]
         for pid, action, cycle in PM_PLAN:
-            day = start + timedelta(days=rng.randint(0, cycle - 1))
-            while day <= end:
-                if not (day > end - timedelta(days=cycle) and rng.random() < 0.25):
-                    add(day, eq["equipment_id"], pid, action, False, rng.choice(PM_TEXT).format(a=action))
-                day += timedelta(days=cycle + rng.randint(-10, 10))
+            if eq_id in ATTENTION_EQUIPMENT:
+                day = start + timedelta(days=rng.randint(0, cycle - 1))
+                while day <= end:
+                    if not (day > end - timedelta(days=cycle) and rng.random() < 0.25):
+                        add(day, eq_id, pid, action, False, rng.choice(PM_TEXT).format(a=action))
+                    day += timedelta(days=cycle + rng.randint(-10, 10))
+            else:
+                day = end - timedelta(days=rng.randint(3, cycle // 3))
+                while day >= start:
+                    add(day, eq_id, pid, action, False, rng.choice(PM_TEXT).format(a=action))
+                    day -= timedelta(days=cycle + rng.randint(-10, 10))
 
     # 2) 비정기 작업 (돌발 + 일상 점검·청소)
     part_ids = [p["part_id"] for p in master_data.PARTS]
